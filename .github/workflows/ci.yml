@@ -24,5 +24,13 @@ jobs:
       - name: Shellcheck
         run: shellcheck scripts/*.sh tests/*.sh
 
+      - name: Install actionlint
+        id: actionlint
+        shell: bash
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+            | bash -s -- latest "$RUNNER_TEMP"
+
       - name: Actionlint
-        uses: rhysd/actionlint@v1
+        run: |
+          "${{ steps.actionlint.outputs.executable }}" -color
