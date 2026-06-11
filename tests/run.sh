@@ -20,6 +20,11 @@ assert_contains() {
   grep -Fq "$expected" "$file" || fail "Expected '$expected' in $file"
 }
 
+assert_no_sync_temp_files_committed() {
+  local repo="$1"
+  ! git -C "$repo" ls-tree -r --name-only HEAD | grep -Eq '^\.codex-upstream-sync/' || fail "sync temp files were committed"
+}
+
 git_init_repo() {
   local path="$1"
   mkdir -p "$path"
@@ -137,7 +142,7 @@ test_clean_merge_push() {
 
   git -C "$work" fetch -q origin main
   git -C "$work" merge-base --is-ancestor HEAD origin/main || fail "origin/main was not updated"
-  ! git -C "$work" ls-tree -r --name-only HEAD | grep -Fq ".codex-upstream-sync" || fail "sync temp files were committed"
+  assert_no_sync_temp_files_committed "$work"
 }
 
 test_conflict_then_manual_resolution() {
@@ -166,7 +171,7 @@ test_conflict_then_manual_resolution() {
 
   run_finalize "$work"
   assert_contains "$scenario/finalize.out" "merge_status=pushed"
-  ! git -C "$work" ls-tree -r --name-only HEAD | grep -Fq ".codex-upstream-sync" || fail "sync temp files were committed"
+  assert_no_sync_temp_files_committed "$work"
 }
 
 test_pr_mode_uses_gh() {
@@ -181,6 +186,36 @@ test_pr_mode_uses_gh() {
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
+  shift 2
+  base=""
+  head=""
+  body_file=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --base)
+        base="${2:-}"
+        shift 2
+        ;;
+      --head)
+        head="${2:-}"
+        shift 2
+        ;;
+      --body-file)
+        body_file="${2:-}"
+        shift 2
+        ;;
+      --title)
+        shift 2
+        ;;
+      *)
+        echo "unexpected gh flag: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+  [[ "$base" == "main" ]] || { echo "unexpected PR base: $base" >&2; exit 1; }
+  [[ "$head" == codex/upstream-sync/main-* ]] || { echo "unexpected PR head: $head" >&2; exit 1; }
+  [[ -n "$body_file" && -s "$body_file" ]] || { echo "missing PR body file" >&2; exit 1; }
   echo "https://github.com/example/repo/pull/1"
   exit 0
 fi
@@ -206,7 +241,7 @@ GH
   )
   assert_contains "$scenario/finalize.out" "merge_status=pr"
   assert_contains "$scenario/finalize.out" "pr_url=https://github.com/example/repo/pull/1"
-  ! git -C "$work" ls-tree -r --name-only HEAD | grep -Fq ".codex-upstream-sync" || fail "sync temp files were committed"
+  assert_no_sync_temp_files_committed "$work"
 }
 
 test_resolve_codex_endpoint() {

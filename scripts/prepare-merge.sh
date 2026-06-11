@@ -111,7 +111,7 @@ main() {
     git remote add "$REMOTE_NAME" "$upstream_url"
   fi
 
-  git fetch --no-tags origin "+refs/heads/$target_branch:refs/remotes/origin/$target_branch" >/dev/null 2>&1 || true
+  git fetch --no-tags origin "+refs/heads/$target_branch:refs/remotes/origin/$target_branch"
   git fetch --no-tags "$REMOTE_NAME" "+refs/heads/$upstream_ref:refs/remotes/$REMOTE_NAME/$upstream_ref"
 
   checkout_target_branch "$target_branch"
