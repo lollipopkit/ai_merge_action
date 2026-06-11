@@ -1,0 +1,144 @@
+name: Codex upstream sync
+description: Sync an upstream branch into the current repository, using Codex only when merge conflicts need repair.
+author: codex
+
+inputs:
+  openai-api-key:
+    description: OpenAI API key used by openai/codex-action when conflicts need Codex.
+    required: true
+  openai-base-url:
+    description: Optional OpenAI-compatible base URL, such as https://proxy.example.com/v1. The action appends /responses unless already present.
+    required: false
+    default: ""
+  github-token:
+    description: GitHub token used to push branches and create pull requests.
+    required: true
+  upstream-repository:
+    description: Upstream repository as owner/repo, HTTPS URL, SSH URL, or local path.
+    required: true
+  upstream-ref:
+    description: Upstream branch name to merge.
+    required: false
+    default: main
+  upstream-token:
+    description: Optional token for fetching a private GitHub upstream repository.
+    required: false
+    default: ""
+  target-branch:
+    description: Target branch to sync into. Defaults to the checked-out branch.
+    required: false
+    default: ""
+  mode:
+    description: Delivery mode after a successful merge. Valid values are pr or push.
+    required: false
+    default: pr
+  test-command:
+    description: Optional command to run after the merge is resolved and before delivery.
+    required: false
+    default: ""
+  commit-message:
+    description: Commit message for the upstream sync merge commit.
+    required: false
+    default: "chore: sync upstream"
+  branch-prefix:
+    description: Prefix for pull request sync branches.
+    required: false
+    default: codex/upstream-sync
+  git-user-name:
+    description: Git author name used for the merge commit.
+    required: false
+    default: github-actions[bot]
+  git-user-email:
+    description: Git author email used for the merge commit.
+    required: false
+    default: 41898282+github-actions[bot]@users.noreply.github.com
+  codex-model:
+    description: Optional model passed to openai/codex-action.
+    required: false
+    default: ""
+  codex-effort:
+    description: Optional reasoning effort passed to openai/codex-action.
+    required: false
+    default: ""
+  codex-args:
+    description: Optional extra arguments passed to codex exec through openai/codex-action.
+    required: false
+    default: ""
+  sandbox:
+    description: Codex sandbox mode for conflict repair.
+    required: false
+    default: workspace-write
+
+outputs:
+  changed:
+    description: Whether upstream sync produced a local merge change.
+    value: ${{ steps.prepare.outputs.changed || steps.finalize.outputs.changed }}
+  codex-used:
+    description: Whether Codex was invoked to repair merge conflicts.
+    value: ${{ steps.prepare.outputs.needs_codex }}
+  merge-status:
+    description: Merge status, such as up-to-date, clean, conflict, pushed, or pr.
+    value: ${{ steps.finalize.outputs.merge_status || steps.prepare.outputs.merge_status }}
+  branch:
+    description: Sync branch name used for delivery.
+    value: ${{ steps.prepare.outputs.branch || steps.finalize.outputs.branch }}
+  commit-sha:
+    description: Merge commit SHA when a change was delivered.
+    value: ${{ steps.finalize.outputs.commit_sha }}
+  pr-url:
+    description: Pull request URL when mode is pr.
+    value: ${{ steps.finalize.outputs.pr_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare upstream merge
+      id: prepare
+      shell: bash
+      env:
+        INPUT_UPSTREAM_REPOSITORY: ${{ inputs.upstream-repository }}
+        INPUT_UPSTREAM_REF: ${{ inputs.upstream-ref }}
+        INPUT_UPSTREAM_TOKEN: ${{ inputs.upstream-token }}
+        INPUT_TARGET_BRANCH: ${{ inputs.target-branch }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_BRANCH_PREFIX: ${{ inputs.branch-prefix }}
+        INPUT_GIT_USER_NAME: ${{ inputs.git-user-name }}
+        INPUT_GIT_USER_EMAIL: ${{ inputs.git-user-email }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/prepare-merge.sh"
+
+    - name: Build Codex conflict prompt
+      if: steps.prepare.outputs.needs_codex == 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/build-codex-prompt.sh"
+
+    - name: Resolve Codex Responses endpoint
+      id: codex_endpoint
+      if: steps.prepare.outputs.needs_codex == 'true'
+      shell: bash
+      env:
+        INPUT_OPENAI_BASE_URL: ${{ inputs.openai-base-url }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/resolve-codex-endpoint.sh"
+
+    - name: Repair merge conflicts with Codex
+      if: steps.prepare.outputs.needs_codex == 'true'
+      uses: openai/codex-action@v1
+      with:
+        openai-api-key: ${{ inputs.openai-api-key }}
+        responses-api-endpoint: ${{ steps.codex_endpoint.outputs.responses-api-endpoint }}
+        prompt-file: .codex-upstream-sync/prompt.md
+        model: ${{ inputs.codex-model }}
+        effort: ${{ inputs.codex-effort }}
+        codex-args: ${{ inputs.codex-args }}
+        sandbox: ${{ inputs.sandbox }}
+
+    - name: Finalize upstream sync
+      id: finalize
+      if: steps.prepare.outputs.changed == 'true'
+      shell: bash
+      env:
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_TEST_COMMAND: ${{ inputs.test-command }}
+        INPUT_COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        INPUT_UPSTREAM_REPOSITORY: ${{ inputs.upstream-repository }}
+        INPUT_UPSTREAM_REF: ${{ inputs.upstream-ref }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/finalize.sh"
