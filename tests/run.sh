@@ -57,6 +57,8 @@ setup_repos() {
   git clone -q --bare "$seed" "$upstream_bare"
   git clone -q "$origin_bare" "$work"
   git -C "$work" switch -q main
+  git -C "$work" config user.name "Target User"
+  git -C "$work" config user.email "target@example.com"
 
   git clone -q "$upstream_bare" "$upstream_work"
   git -C "$upstream_work" switch -q main
